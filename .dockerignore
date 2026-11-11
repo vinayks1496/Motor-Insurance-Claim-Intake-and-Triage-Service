@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+__pycache__
+*.pyc
+data/index
+data/run
+frontend
+evaluation/results/*.json
+evaluation/results/*.csv
+tmp-project-spec-*.png

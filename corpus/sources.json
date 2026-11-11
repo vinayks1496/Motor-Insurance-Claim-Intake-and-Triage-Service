@@ -1,0 +1,28 @@
+{
+  "sources": [
+    {
+      "document_id": "NIA-PC-PACKAGE",
+      "title": "New India Assurance Private Car Base Package Policy",
+      "type": "policy_wording",
+      "url": "https://www.newindia.co.in/assets/docs/know-more/motor/STANDARD%20FORM%20FOR%20PRIVATE%20CAR%20BASE%20PACKAGE%20POLICY.pdf",
+      "version": "UIN IRDAN190RP0042V01100001",
+      "pages": "all"
+    },
+    {
+      "document_id": "IMT-PC-USE",
+      "title": "India Motor Tariff 2002, private car section",
+      "type": "policy_restrictions",
+      "url": "https://www.newindia.co.in/cms/2a38793a-2c85-4d42-bc23-d510918c432e/IMT%202002.pdf?guest=true",
+      "version": "New India Assurance hosted tariff copy",
+      "pages": [25, 26]
+    },
+    {
+      "document_id": "NIA-MOTOR-CLAIM-GUIDE",
+      "title": "New India Assurance Motor Insurance Do's and Don'ts",
+      "type": "claims_procedure",
+      "url": "https://www.newindia.co.in/assets/docs/know-more/motor/DOs%20AND%20DONTS%20Motor_dep.pdf",
+      "version": "Company guidance PDF",
+      "pages": "all"
+    }
+  ]
+}

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0e0e0e" />
+    <meta name="description" content="Human-reviewed motor claim intake and triage workspace." />
+    <title>ClaimFlow — Claims workspace</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <a class="brand" href="#" aria-label="ClaimFlow home">
+          <span class="brand-mark">cf</span>
+          <span class="brand-word">claimflow<span class="brand-dot">.</span></span>
+        </a>
+        <div class="workspace-chip">
+          <span class="workspace-avatar">NI</span>
+          <span><strong>New India Assurance</strong><small>Private car package</small></span>
+          <span class="chevron">⌄</span>
+        </div>
+        <p class="nav-label">workspace</p>
+        <nav class="primary-nav">
+          <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span>Overview</button>
+          <button class="nav-item" data-view="claims"><span class="nav-icon">▤</span>Claims <span class="nav-count" id="nav-open-count">0</span></button>
+          <button class="nav-item" data-view="evidence"><span class="nav-icon">⌕</span>Policy evidence</button>
+          <button class="nav-item" data-view="feedback"><span class="nav-icon">↗</span>Feedback</button>
+          <button class="nav-item" data-view="evaluation"><span class="nav-icon">▥</span>Evaluation</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="corpus-status">
+            <div class="status-line"><span class="pulse-dot"></span><span>Corpus indexed</span></div>
+            <p id="corpus-meta">Loading source details…</p>
+            <a href="#" data-view="evidence">View sources <span>↗</span></a>
+          </div>
+          <div class="user-row">
+            <div class="user-avatar">CH</div>
+            <div><strong>Claims handler</strong><small>Local workspace</small></div>
+            <button class="icon-button" title="Workspace settings" aria-label="Workspace settings">···</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span class="crumb-sep">/</span><strong id="page-crumb">Overview</strong></div>
+          <div class="topbar-actions">
+            <div class="live-indicator"><span class="pulse-dot"></span><span>all systems operational</span></div>
+            <button id="provider-demo" class="button button-quiet button-small" title="Simulate a provider outage for the circuit-breaker demonstration">Simulate outage</button>
+            <button class="avatar-small" aria-label="Claims handler">CH</button>
+          </div>
+        </header>
+
+        <section class="content">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">claims operations <span class="eyebrow-divider">/</span> home</p>
+              <h1>Claims workspace</h1>
+              <p class="subheading">Intake, review and route motor claims with policy evidence attached.</p>
+            </div>
+            <button class="button button-primary" id="new-claim-button"><span class="plus">+</span> New intake</button>
+          </div>
+
+          <section class="stats-grid" aria-label="Claim run metrics">
+            <article class="stat-card">
+              <div class="stat-top"><span class="eyebrow">runs in view</span><span class="stat-icon">↗</span></div>
+              <div class="stat-value" id="stat-runs">—</div>
+              <div class="stat-foot"><span class="stat-dot"></span>Last 100 submitted</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="eyebrow">in queue</span><span class="stat-icon">◷</span></div>
+              <div class="stat-value" id="stat-queued">—</div>
+              <div class="stat-foot">Waiting for agent handoff</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="eyebrow">human review</span><span class="stat-icon">↗</span></div>
+              <div class="stat-value" id="stat-escalated">—</div>
+              <div class="stat-foot">Escalated to claims handler</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="eyebrow">run p95</span><span class="stat-icon">⌁</span></div>
+              <div class="stat-value"><span id="stat-p95">—</span><small> sec</small></div>
+              <div class="stat-foot"><span id="slo-state" class="slo-state">target 15 sec</span></div>
+            </article>
+          </section>
+
+          <div class="workspace-grid">
+            <section class="panel intake-panel" id="intake-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">first notice of loss</p>
+                  <h2>New claim intake</h2>
+                </div>
+                <span class="panel-index">01 — 02</span>
+              </div>
+              <p class="panel-copy">Submit the incident details. Validation runs before the agents receive any text.</p>
+
+              <div id="form-alert" class="alert hidden" role="status"></div>
+              <form id="claim-form">
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Client reference <i>required</i></span>
+                    <input id="client-reference" name="client_reference" required minlength="3" maxlength="64" />
+                  </label>
+                  <label class="field">
+                    <span>Policy number <i>required</i></span>
+                    <input name="policy_number" required minlength="5" maxlength="40" placeholder="e.g. NIA-24-018427" />
+                  </label>
+                  <label class="field">
+                    <span>Vehicle registration <i>required</i></span>
+                    <input name="registration_number" required placeholder="KA03MN1234" />
+                  </label>
+                  <label class="field">
+                    <span>Date of loss <i>required</i></span>
+                    <input name="loss_date" type="date" required />
+                  </label>
+                  <label class="field">
+                    <span>Date reported <i>required</i></span>
+                    <input name="reported_at" type="date" required />
+                  </label>
+                  <label class="field">
+                    <span>Incident type</span>
+                    <select name="loss_kind">
+                      <option value="collision">Collision / damage</option>
+                      <option value="theft">Theft</option>
+                      <option value="fire">Fire</option>
+                      <option value="flood">Flood / natural event</option>
+                      <option value="third_party">Third-party incident</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Vehicle use</span>
+                    <select name="vehicle_use">
+                      <option value="unknown">Not specified</option>
+                      <option value="private">Private</option>
+                      <option value="commuting">Commuting</option>
+                      <option value="professional">Professional</option>
+                      <option value="delivery">Delivery work</option>
+                      <option value="commercial">Commercial</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Repair estimate <small>INR, optional</small></span>
+                    <input name="estimate_inr" type="number" min="0" max="50000000" step="1000" placeholder="45000" />
+                  </label>
+                </div>
+                <label class="field description-field">
+                  <span>What happened? <i>required</i></span>
+                  <textarea name="loss_description" required minlength="20" maxlength="4000" rows="4" placeholder="Describe the incident in your own words…"></textarea>
+                  <small>Free text is screened for prompt injection and toxicity before model processing.</small>
+                </label>
+                <div class="form-options">
+                  <label class="check-field"><input name="injury_reported" type="checkbox" /><span>Injury reported</span></label>
+                  <label class="check-field"><input name="police_reported" type="checkbox" /><span>Police informed</span></label>
+                  <div id="injury-count-wrap" class="injury-count hidden"><label class="field"><span>People injured</span><input name="injury_count" type="number" min="1" max="99" value="1" /></label></div>
+                </div>
+                <div class="form-footer">
+                  <button type="button" id="food-delivery-example" class="button button-quiet">Use delivery scenario <span>↗</span></button>
+                  <button type="submit" class="button button-primary" id="submit-button">Submit for triage <span class="button-arrow">→</span></button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel routing-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">routing overview</p><h2>Queue distribution</h2></div>
+                <span class="status-chip"><span class="pulse-dot"></span>live</span>
+              </div>
+              <div class="route-list">
+                <div class="route-row">
+                  <div class="route-symbol fast">F</div>
+                  <div class="route-detail"><strong>Fast-track</strong><small>Low-cost, evidence-aligned</small></div>
+                  <span id="route-fast" class="route-count">0</span>
+                </div>
+                <div class="route-row">
+                  <div class="route-symbol survey">S</div>
+                  <div class="route-detail"><strong>Surveyor assignment</strong><small>Damage or specialist assessment</small></div>
+                  <span id="route-surveyor" class="route-count">0</span>
+                </div>
+                <div class="route-row">
+                  <div class="route-symbol investigation">H</div>
+                  <div class="route-detail"><strong>Investigation / human review</strong><small>Weak, conflicting or limited evidence</small></div>
+                  <span id="route-investigation" class="route-count">0</span>
+                </div>
+              </div>
+              <div class="route-note">
+                <span class="note-mark">i</span>
+                <p>Recommendations are advisory. A claims handler makes every coverage decision.</p>
+              </div>
+              <div class="quality-summary">
+                <div class="quality-heading"><span class="eyebrow">live quality sample</span><span id="quality-count">0 runs</span></div>
+                <div class="quality-bars" id="quality-bars">
+                  <div class="quality-empty">Quality trend appears as live runs are sampled.</div>
+                </div>
+                <div class="quality-legend"><span>groundedness</span><span>faithfulness</span><span>context relevance</span></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel runs-panel" id="runs-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">activity</p><h2>Recent claims</h2></div>
+              <div class="table-actions">
+                <label class="searchbox"><span>⌕</span><input id="run-search" type="search" placeholder="Search claims" /></label>
+                <button class="button button-quiet button-small" id="refresh-button">Refresh <span>↻</span></button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Claim / vehicle</th><th>Incident</th><th>Queue</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+                <tbody id="runs-body"><tr><td colspan="6" class="empty-row">Loading recent runs…</td></tr></tbody>
+              </table>
+            </div>
+            <div class="table-footer"><span id="run-table-summary">Showing the latest claims</span><span class="table-footer-right">updates every 5 sec <span class="pulse-dot"></span></span></div>
+          </section>
+
+          <footer class="page-footer"><span>CLAIMFLOW · MOTOR CLAIM INTAKE</span><span>Local workspace <span class="footer-sep">·</span> advisory only</span></footer>
+        </section>
+      </main>
+    </div>
+
+    <div id="detail-backdrop" class="detail-backdrop hidden"></div>
+    <aside id="detail-panel" class="detail-panel" aria-label="Claim details" aria-hidden="true">
+      <div class="detail-header">
+        <div><p class="eyebrow">claim review</p><h2 id="detail-title">Run details</h2></div>
+        <button id="close-detail" class="icon-button close-button" aria-label="Close claim details">×</button>
+      </div>
+      <div id="detail-content" class="detail-content"><div class="detail-loading">Select a claim to inspect its evidence.</div></div>
+    </aside>
+
+    <div id="toast" class="toast" role="status"></div>
+  </body>
+</html>

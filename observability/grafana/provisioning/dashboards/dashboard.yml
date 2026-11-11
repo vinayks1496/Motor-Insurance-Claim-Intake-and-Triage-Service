@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: ClaimFlow
+    folder: ClaimFlow
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

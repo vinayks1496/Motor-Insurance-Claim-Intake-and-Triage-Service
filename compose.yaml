@@ -1,0 +1,248 @@
+name: claimflow
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_HOST: ${DATABASE_HOST:-postgres}
+  DATABASE_PORT: ${DATABASE_PORT:-5432}
+  DATABASE_NAME: ${DATABASE_NAME:-claims}
+  DATABASE_USER: ${DATABASE_USER:-postgres}
+  DATABASE_PASSWORD: ${DATABASE_PASSWORD:-}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  LLM_BACKEND: ${LLM_BACKEND:-stub}
+  LLM_ENDPOINT: ${LLM_ENDPOINT:-}
+  LLM_MODEL_ID: ${LLM_MODEL_ID:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-8}
+  LLM_INPUT_COST_PER_MILLION: ${LLM_INPUT_COST_PER_MILLION:-0}
+  LLM_OUTPUT_COST_PER_MILLION: ${LLM_OUTPUT_COST_PER_MILLION:-0}
+  LLM_STUB_DELAY_SECONDS: ${LLM_STUB_DELAY_SECONDS:-1.1}
+  CORPUS_FETCH_REMOTE: ${CORPUS_FETCH_REMOTE:-true}
+  CORPUS_PDF_DIR: /app/data/source_pdfs
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
+  CLIENT_RATE_LIMIT_PER_MINUTE: ${CLIENT_RATE_LIMIT_PER_MINUTE:-8}
+  RUN_SLO_P95_SECONDS: ${RUN_SLO_P95_SECONDS:-15}
+  INDEX_DIR: /app/data/index
+  CORPUS_DIR: /app/corpus
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-claims}
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${DATABASE_NAME:-claims}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [internal]
+
+  llm-stub:
+    build: .
+    command: ["uvicorn", "app.stub_server:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      LLM_STUB_DELAY_SECONDS: ${LLM_STUB_DELAY_SECONDS:-1.1}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [internal]
+
+  corpus-indexer:
+    build: .
+    command: ["python", "-m", "app.scripts.index_corpus"]
+    environment: *app-env
+    volumes:
+      - corpus-index:/app/data/index
+      - corpus-source:/app/data/source_pdfs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  api:
+    build: .
+    environment: *app-env
+    volumes:
+      - corpus-index:/app/data/index:ro
+      - ./evaluation/results:/app/evaluation/results
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+      corpus-indexer:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  intake-worker:
+    build: .
+    command: ["python", "-m", "app.workers.intake"]
+    environment: *app-env
+    volumes:
+      - corpus-index:/app/data/index:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+      corpus-indexer:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9101/metrics', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  coverage-worker:
+    build: .
+    command: ["python", "-m", "app.workers.coverage"]
+    environment: *app-env
+    volumes:
+      - corpus-index:/app/data/index:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+      corpus-indexer:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9102/metrics', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks: [internal]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.64
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    restart: unless-stopped
+    networks: [internal]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks: [internal]
+
+  locust:
+    build: .
+    command: ["locust", "-f", "app/loadtest/locustfile.py", "--host", "http://api:8000", "--web-host", "0.0.0.0"]
+    profiles: [loadtest]
+    environment: *app-env
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - ./evaluation/results:/app/evaluation/results
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  postgres-data:
+  redis-data:
+  corpus-index:
+  corpus-source:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  internal:
+    driver: bridge
