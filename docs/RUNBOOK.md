@@ -20,11 +20,13 @@ The web workspace is at `http://localhost:8080`; API documentation is at `http:/
 4. Coverage searches the policy corpus, retrieves restrictions and exceptions, and verifies citation IDs and lexical support. Weak retrieval, unsupported scope, conflicting evidence, provider failure, or a guardrail hit routes the run to investigation. It never approves or rejects a claim.
 5. Review the run timeline, clauses, verification note, route reason, token/cost data, and handler feedback in the workspace.
 
-Statuses used by the API include `queued`, `intake_in_progress`, `coverage_pending`, `coverage_in_progress`, `completed`, `escalated`, and `quarantined`.
+Statuses used by the API include `queued`, `intake_in_progress`, `coverage_pending`, `coverage_in_progress`, `completed`, `escalated`, and `quarantined`. `completed` means the automated review produced a verified result; its route may still be `investigation` or `surveyor_assignment` for a human handler. `escalated` means the automated review could not produce a verified result.
 
 ## Provider unavailable or slow
 
 The LLM client uses bounded retries, timeout, and a Redis circuit breaker. If intake or coverage cannot complete, the workflow returns an investigation escalation without a confident coverage position. Check the `claimflow_llm_retries_total` metric and worker logs. For a safe demonstration, use **Simulate outage** in the UI or `POST /api/v1/demo/provider-outage` with `{"enabled":true,"duration_seconds":60}`. Disable it with `{"enabled":false}`. Confirm a new run reaches human review, then inspect the provider recovery and clear any open circuit via the endpoint.
+
+If a run has a recorded coverage processing failure after intake, open its claim drawer and choose **Retry coverage analysis** after the service has recovered. The retry preserves the validated intake and existing audit timeline. A retry can still end in `escalated` if evidence cannot be verified; do not mark an unverified result as completed.
 
 For an external OpenAI-compatible provider, set `LLM_BACKEND=openai_compatible`, `LLM_ENDPOINT`, `LLM_MODEL_ID`, and `LLM_API_KEY` in an untracked `.env`; configure input/output cost rates if known. Restart app services and submit a low-risk synthetic case. Never put credentials in prompts, logs, screenshots, or source control.
 
@@ -34,6 +36,7 @@ For an external OpenAI-compatible provider, set `LLM_BACKEND=openai_compatible`,
 - Restart only the affected worker with `docker compose restart intake-worker` or `docker compose restart coverage-worker`.
 - RQ retries a failed job up to three times. Check the Redis-backed queue and the run status before manually resubmitting; use the same idempotency key to avoid duplicate runs.
 - If intake queued successfully but coverage is delayed, retain the run ID and let the worker recover. A stuck or terminal failure must be reviewed by a handler; do not manufacture a verified result.
+- A terminal coverage failure after intake can be retried from the claim drawer or with `POST /api/v1/runs/{run_id}/retry`; only runs with a recorded coverage failure are eligible.
 - Scale coverage workers with `docker compose up -d --scale coverage-worker=3`. Each replica binds its own metrics port in its container; update Prometheus targets if per-replica metrics are needed.
 
 ## Corpus index stale or missing

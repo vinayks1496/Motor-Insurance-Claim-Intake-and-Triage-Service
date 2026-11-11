@@ -94,12 +94,9 @@ def process_coverage(run_id: str) -> None:
             with session_scope() as session:
                 session.add(QualitySample(run_id=run_id, **quality))
             record_event(run_id, correlation_id, "quality", "sample_scored", quality)
-        if not final.get("verification", {}).get("verified"):
-            status = "escalated"
-        elif final.get("escalated"):
-            status = "escalated"
-        else:
-            status = "completed"
+        # Completed means automated processing produced a verified result.
+        # A verified result can still be routed to investigation for a handler.
+        status = "completed" if final.get("verification", {}).get("verified") else "escalated"
         elapsed = finalize_run(run_id, correlation_id, final, status=status, agent="coverage")
         run_latency.observe(elapsed)
         completed_runs.labels(status=status).inc()

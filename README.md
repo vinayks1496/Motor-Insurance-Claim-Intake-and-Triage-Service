@@ -61,6 +61,8 @@ PostgreSQL stores FNOL records, run state, correlation IDs, agent events, prompt
 5. Use the **Use delivery scenario** button to try the intentionally difficult paid food-delivery case. The index includes both the own-damage wording and private-car use restrictions; the expected behavior is an investigation route for handler review.
 6. Use **Simulate outage** to exercise bounded provider retries and safe human fallback. It enables a local Redis flag for 60 seconds and does not make an external provider call.
 
+`Completed` records a verified automated review. A completed run can still be routed to investigation for a handler. Runs escalated after a coverage processing failure show **Retry coverage analysis**, which preserves the completed intake and queues coverage again.
+
 The UI uses a near-black background, compact mono labels, restrained borders and rounded panels inspired by the requested Lilcloud project. It is an original ClaimFlow workspace, not a copy of Lilcloud's application.
 
 ## API surface
@@ -69,7 +71,9 @@ The UI uses a near-black background, compact mono labels, restrained borders and
 |---|---|
 | `POST /api/v1/runs` | Validate, quarantine or asynchronously accept an FNOL (202) |
 | `GET /api/v1/runs?limit=50` | List recent runs |
+| `GET /api/v1/runs/count` | Return the total submitted-claim count for the live navigation badge |
 | `GET /api/v1/runs/{run_id}` | Read run state, result, clauses and event timeline |
+| `POST /api/v1/runs/{run_id}/retry` | Retry coverage after a recorded processing failure |
 | `GET /api/v1/quarantine` | Review invalid submissions; no agent starts for quarantined input |
 | `POST /api/v1/runs/{run_id}/feedback` | Record handler satisfaction and a reason |
 | `GET /api/v1/feedback/summary`, `/recent` | Inspect the feedback loop |

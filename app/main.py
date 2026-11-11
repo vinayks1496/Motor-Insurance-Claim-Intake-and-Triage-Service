@@ -250,6 +250,12 @@ def contracts() -> dict[str, Any]:
             "path": "/api/v1/runs/{run_id}/feedback",
             "schema": FeedbackRequest.model_json_schema(),
         },
+        "retry_coverage": {
+            "method": "POST",
+            "path": "/api/v1/runs/{run_id}/retry",
+            "success_status": 202,
+            "description": "Retry coverage after a recorded processing failure; preserve intake.",
+        },
     }
 
 
@@ -362,6 +368,13 @@ def list_runs(limit: int = 50) -> dict[str, Any]:
         return {"runs": [_dump_run(run) for run in runs]}
 
 
+@app.get("/api/v1/runs/count")
+def count_runs() -> dict[str, int]:
+    with session_scope() as session:
+        total = session.scalar(select(func.count()).select_from(ClaimRun)) or 0
+        return {"total": int(total)}
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run_detail(run_id: str) -> dict[str, Any]:
     with session_scope() as session:
@@ -369,6 +382,85 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         if not run:
             raise HTTPException(status_code=404, detail="run not found")
         return _dump_run(run, include_events=True)
+
+
+@app.post("/api/v1/runs/{run_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+def retry_coverage(run_id: str) -> dict[str, Any]:
+    """Retry coverage analysis after an infrastructure failure, preserving the intake."""
+    with session_scope() as session:
+        run = session.scalar(
+            select(ClaimRun).where(ClaimRun.id == run_id).with_for_update()
+        )
+        if not run:
+            raise HTTPException(status_code=404, detail="run not found")
+        if run.status != "escalated" or not run.intake:
+            raise HTTPException(
+                status_code=409,
+                detail="Only escalated runs with a completed intake can retry coverage.",
+            )
+        failed_coverage = session.scalar(
+            select(RunEvent.id)
+            .where(
+                RunEvent.run_id == run_id,
+                RunEvent.agent == "coverage",
+                RunEvent.event_type == "agent_failure",
+            )
+            .limit(1)
+        )
+        if failed_coverage is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This run was not escalated by a coverage processing failure.",
+            )
+        previous_result = run.result
+        correlation_id = run.correlation_id
+        run.status = "coverage_pending"
+        run.result = None
+        run.finished_at = None
+        run.updated_at = datetime.now(timezone.utc)
+
+    try:
+        queue = Queue("coverage", connection=redis_client, default_timeout=120)
+        queue.enqueue(
+            "app.workers.coverage.process_coverage",
+            run_id,
+            retry=Retry(max=3, interval=[1, 2, 4]),
+            job_timeout=120,
+            result_ttl=3600,
+            failure_ttl=86400,
+        )
+        queue_depth.labels(queue="coverage").set(queue.count)
+    except Exception as exc:
+        logger.exception(
+            "Coverage retry could not enter the processing queue",
+            extra={"run_id": run_id, "correlation_id": correlation_id, "agent": "coverage"},
+        )
+        with session_scope() as session:
+            run = session.get(ClaimRun, run_id)
+            if run and run.status == "coverage_pending":
+                run.status = "escalated"
+                run.result = previous_result
+                run.finished_at = datetime.now(timezone.utc)
+                run.updated_at = datetime.now(timezone.utc)
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "queue_unavailable", "run_id": run_id},
+        ) from exc
+
+    try:
+        record_event(
+            run_id,
+            correlation_id,
+            "coverage",
+            "retry_queued",
+            {"preserved_intake": True},
+        )
+    except Exception:
+        logger.exception(
+            "Coverage retry event could not be recorded",
+            extra={"run_id": run_id, "correlation_id": correlation_id, "agent": "coverage"},
+        )
+    return {"run_id": run_id, "correlation_id": correlation_id, "status": "coverage_pending"}
 
 
 @app.get("/api/v1/quarantine")

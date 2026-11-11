@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import json
+import math
 import socket
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -14,6 +15,27 @@ from app.database import session_scope
 from app.models import ClaimRun, RunEvent
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    """Normalize values before sending them to PostgreSQL's JSON columns."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    # Handle numpy and similar scalar values without importing optional packages.
+    if callable(getattr(value, "item", None)):
+        try:
+            return _json_safe(value.item())
+        except (TypeError, ValueError):
+            pass
+    return str(value)
 
 
 def start_heartbeat(agent: str, redis_connection) -> None:
@@ -78,7 +100,7 @@ def record_event(
                 correlation_id=correlation_id,
                 agent=agent,
                 event_type=event_type,
-                payload=payload or {},
+                payload=_json_safe(payload or {}),
                 prompt_version=prompt_version,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -121,7 +143,7 @@ def finalize_run(
         run = session.get(ClaimRun, run_id)
         if not run:
             return 0.0
-        run.result = result
+        run.result = _json_safe(result)
         run.status = status
         run.finished_at = finished
         run.updated_at = finished

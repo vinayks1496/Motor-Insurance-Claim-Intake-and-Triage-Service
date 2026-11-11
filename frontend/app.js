@@ -8,6 +8,7 @@
   const toast = document.getElementById("toast");
   let activeView = "overview";
   let toastTimer;
+  let detailPollTimer;
   let refreshBusy = false;
 
   const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -101,7 +102,6 @@
       set("stat-queued", totals.queued ?? 0);
       set("stat-escalated", totals.escalated ?? 0);
       set("stat-p95", formatSeconds(performance.p95_seconds));
-      set("nav-open-count", (totals.queued || 0) + (totals.escalated || 0));
       const slo = document.getElementById("slo-state");
       if (slo) { slo.textContent = performance.slo_met ? "within 15 sec target" : `target ${dashboard.slo?.p95_seconds ?? 15} sec`; slo.classList.toggle("met", !!performance.slo_met); }
       const routes = totals.routes || {};
@@ -121,6 +121,17 @@
     } catch (error) {
       notify(`Workspace data is unavailable: ${error.message}`, true);
     } finally { refreshBusy = false; }
+  }
+
+  async function refreshNavCount() {
+    const badge = document.getElementById("nav-claims-count");
+    if (!badge) return;
+    try {
+      const result = await api("/api/v1/runs/count");
+      badge.textContent = Number(result.total || 0).toLocaleString();
+    } catch {
+      // Keep the last known count visible while the API is temporarily unavailable.
+    }
   }
 
   function showOverview() {
@@ -204,6 +215,7 @@
   async function setView(view) {
     closeDetail();
     setActive(view);
+    refreshNavCount();
     if (view === "overview") return showOverview();
     if (view === "claims") return renderClaims();
     if (view === "evidence") return renderEvidence();
@@ -212,6 +224,8 @@
   }
 
   async function openRun(runId) {
+    clearTimeout(detailPollTimer);
+    detailPollTimer = null;
     detailPanel.classList.add("open");
     detailPanel.setAttribute("aria-hidden", "false");
     detailBackdrop.classList.remove("hidden");
@@ -224,7 +238,8 @@
       const citations = result.citations || [];
       const events = run.events || [];
       const guardrails = result.guardrail_flags || fnol._guardrails || {};
-      detailContent.innerHTML = `<div class="detail-meta"><div><span>Run status</span><strong>${statusChip(run.status)}</strong></div><div><span>Route</span><strong>${text(result.route, "pending").replaceAll("_", " ")}</strong></div><div><span>Position</span><strong>${text(result.coverage_position, "pending").replaceAll("_", " ")}</strong></div><div><span>Vehicle</span><strong>${text(fnol.registration_number)}</strong></div><div><span>Loss date</span><strong>${text(fnol.loss_date)}</strong></div><div><span>Estimate</span><strong>${fnol.estimate_inr == null ? "Not provided" : `₹${Number(fnol.estimate_inr).toLocaleString("en-IN")}`}</strong></div></div>
+      const retryable = run.status === "escalated" && Boolean(run.intake) && events.some((event) => event.agent === "coverage" && event.event_type === "agent_failure");
+      detailContent.innerHTML = `${retryable ? '<section class="detail-section retry-section"><button class="button button-quiet button-small" data-retry-coverage>Retry coverage analysis ↻</button><p class="muted-label">The intake is preserved. Retry after a temporary coverage-processing failure.</p></section>' : ""}<div class="detail-meta"><div><span>Run status</span><strong>${statusChip(run.status)}</strong>${run.status === "completed" && ["investigation", "surveyor_assignment"].includes(result.route) ? '<small>Verified review complete; handler follow-up remains.</small>' : ""}</div><div><span>Route</span><strong>${text(result.route, "pending").replaceAll("_", " ")}</strong></div><div><span>Position</span><strong>${text(result.coverage_position, "pending").replaceAll("_", " ")}</strong></div><div><span>Vehicle</span><strong>${text(fnol.registration_number)}</strong></div><div><span>Loss date</span><strong>${text(fnol.loss_date)}</strong></div><div><span>Estimate</span><strong>${fnol.estimate_inr == null ? "Not provided" : `₹${Number(fnol.estimate_inr).toLocaleString("en-IN")}`}</strong></div></div>
         <section class="recommendation-box"><p class="eyebrow">advisory summary</p><p>${text(result.summary, "This run is still being processed.")}</p>${result.route_reason ? `<p class="review-note">Handler note · ${text(result.route_reason)}</p>` : ""}${verification.note ? `<p class="review-note">Verification · ${text(verification.note)}</p>` : ""}${Object.values(guardrails).some(Boolean) ? '<span class="guardrail-chip">guardrail escalation</span>' : ""}</section>
         <div class="detail-meta"><div><span>Policy number</span><strong>${text(fnol.policy_number)}</strong></div><div><span>Incident type</span><strong>${text(fnol.loss_kind).replaceAll("_", " ")}</strong></div><div><span>Vehicle use</span><strong>${text(fnol.vehicle_use)}</strong></div><div><span>Correlation ID</span><strong>${text(run.correlation_id)}</strong></div></div>
         <section class="detail-section"><div class="detail-section-heading"><h3>Incident description</h3><span>${text(fnol.channel, "web")}</span></div><div class="citation-card"><p>${text(fnol.loss_description)}</p></div></section>
@@ -232,6 +247,19 @@
         <section class="detail-section"><div class="detail-section-heading"><h3>Run timeline</h3><span>${events.length} events</span></div><div class="timeline">${events.map((event) => `<div class="timeline-item"><strong>${text(event.agent)} · ${text(event.event_type).replaceAll("_", " ")}</strong><small>${dateLabel(event.created_at)}${event.prompt_version ? ` · ${text(event.prompt_version)}` : ""}${event.payload?.to ? ` · to ${text(event.payload.to)}` : ""}${event.payload?.latency_ms ? ` · ${text(event.payload.latency_ms)} ms` : ""}</small></div>`).join("") || '<p class="quality-empty">Events will appear as agents work.</p>'}</div></section>
         <section class="detail-section"><div class="detail-section-heading"><h3>Usage and prompt</h3><span>${text(result.prompt_version, "—")}</span></div><div class="detail-meta"><div><span>Model calls</span><strong>${text(result.usage?.calls, "0")}</strong></div><div><span>Input / output tokens</span><strong>${text(result.usage?.input_tokens, "0")} / ${text(result.usage?.output_tokens, "0")}</strong></div><div><span>Estimated cost</span><strong>$${Number(result.usage?.cost_usd || 0).toFixed(6)}</strong></div><div><span>Created</span><strong>${dateLabel(run.created_at)}</strong></div></div></section>
         ${["completed", "escalated"].includes(run.status) ? `<section class="feedback-form"><p class="eyebrow">handler feedback</p><p>Was this advisory review useful? Add a short reason to support future evaluation.</p><textarea class="feedback-reason" id="feedback-reason" rows="2" minlength="4" maxlength="1000" placeholder="What was helpful or what should improve?"></textarea><div class="feedback-actions"><button class="button button-quiet button-small" data-feedback="true">Helpful</button><button class="button button-quiet button-small" data-feedback="false">Needs work</button></div></section>` : ""}`;
+      const retryButton = detailContent.querySelector("[data-retry-coverage]");
+      if (retryButton) retryButton.addEventListener("click", async () => {
+        retryButton.disabled = true;
+        try {
+          await api(`/api/v1/runs/${encodeURIComponent(run.run_id)}/retry`, { method: "POST" });
+          notify("Coverage retry queued. This panel will update automatically.");
+          refreshNavCount();
+          await openRun(run.run_id);
+        } catch (error) {
+          notify(`Coverage retry could not be queued: ${error.message}`, true);
+          retryButton.disabled = false;
+        }
+      });
       const title = document.getElementById("detail-title");
       title.textContent = fnol.client_reference || `Run ${shortId(run.run_id)}`;
       detailContent.querySelectorAll("[data-feedback]").forEach((button) => button.addEventListener("click", async () => {
@@ -243,10 +271,15 @@
           if (activeView === "feedback") renderFeedback();
         } catch (error) { notify(`Feedback could not be saved: ${error.message}`, true); }
       }));
+      if (!['completed', 'escalated', 'quarantined'].includes(run.status) && detailPanel.classList.contains("open")) {
+        detailPollTimer = setTimeout(() => openRun(run.run_id), 2500);
+      }
     } catch (error) { detailContent.innerHTML = `<div class="detail-loading">Claim details could not load: ${escapeHTML(error.message)}</div>`; }
   }
 
   function closeDetail() {
+    clearTimeout(detailPollTimer);
+    detailPollTimer = null;
     detailPanel.classList.remove("open");
     detailPanel.setAttribute("aria-hidden", "true");
     detailBackdrop.classList.add("hidden");
@@ -268,6 +301,7 @@
     try {
       const accepted = await api("/api/v1/runs", { method: "POST", body: JSON.stringify(values), headers: { "Idempotency-Key": `web-${values.client_reference}` } });
       notify(`Claim queued · ${shortId(accepted.run_id)}`);
+      refreshNavCount();
       form.reset();
       setDefaultDates();
       const clientRef = document.getElementById("client-reference");
@@ -331,5 +365,7 @@
   detailBackdrop.addEventListener("click", closeDetail);
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDetail(); });
   showOverview();
+  refreshNavCount();
+  setInterval(refreshNavCount, 5000);
   setInterval(refreshOverview, 5000);
 })();
