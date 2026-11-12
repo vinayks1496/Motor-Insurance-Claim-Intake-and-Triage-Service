@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 
 def env(name: str, default: str = "") -> str:
@@ -37,19 +37,48 @@ def redis_url() -> str:
 
 
 def llm_timeout() -> float:
-    return number("LLM_TIMEOUT_SECONDS", 8.0)
+    return number("LLM_TIMEOUT_SECONDS", 20.0)
 
 
 def llm_backend() -> str:
     return env("LLM_BACKEND", "stub").lower()
 
 
+def llm_provider() -> str:
+    configured = env("LLM_PROVIDER")
+    if configured:
+        return configured
+    return urlsplit(llm_endpoint()).hostname or llm_backend()
+
+
 def llm_endpoint() -> str:
     return env("LLM_ENDPOINT")
 
 
-def llm_model_id() -> str:
+def llm_model_id(role: str | None = None) -> str:
+    if role:
+        role_model = env(f"LLM_{role.upper()}_MODEL_ID")
+        if role_model:
+            return role_model
     return env("LLM_MODEL_ID")
+
+
+def llm_json_mode() -> bool:
+    return env("LLM_JSON_MODE", "true").lower() not in {"0", "false", "no", "off"}
+
+
+def llm_temperature() -> float:
+    return number("LLM_TEMPERATURE", 0.0)
+
+
+def llm_cost_per_million(role: str, direction: str) -> float:
+    role_key = f"LLM_{role.upper()}_{direction.upper()}_COST_PER_MILLION"
+    global_key = f"LLM_{direction.upper()}_COST_PER_MILLION"
+    raw = env(role_key) or env(global_key, "0")
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
 
 
 def llm_api_key() -> str:

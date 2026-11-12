@@ -93,6 +93,8 @@ def process_intake(run_id: str) -> None:
                 "classification": result.get("classification"),
                 "entities": result.get("entities"),
                 "retries": int(usage.get("retries", 0)),
+                "provider": usage.get("provider"),
+                "model_id": usage.get("model_id"),
             },
             prompt_version=usage.get("prompt_version", "intake-v1"),
             input_tokens=int(usage.get("input_tokens", 0)),

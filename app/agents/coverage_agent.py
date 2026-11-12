@@ -152,6 +152,8 @@ class CoverageAgent:
                 "cost_usd": response.cost_usd,
                 "retries": response.retries,
                 "prompt_version": version,
+                "provider": response.provider,
+                "model_id": response.model_id,
             }
         )
         llm_retries.labels(agent="coverage").inc(response.retries)

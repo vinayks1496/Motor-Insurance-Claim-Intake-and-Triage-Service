@@ -57,7 +57,12 @@ def process_coverage(run_id: str) -> None:
                 correlation_id,
                 "coverage",
                 "llm_call",
-                {"step": call.get("step", index), "retries": int(call.get("retries", 0))},
+                {
+                    "step": call.get("step", index),
+                    "retries": int(call.get("retries", 0)),
+                    "provider": call.get("provider"),
+                    "model_id": call.get("model_id"),
+                },
                 prompt_version=call.get("prompt_version"),
                 input_tokens=int(call.get("input_tokens", 0)),
                 output_tokens=int(call.get("output_tokens", 0)),

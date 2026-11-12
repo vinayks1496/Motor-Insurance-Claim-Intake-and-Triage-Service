@@ -52,6 +52,8 @@ class IntakeAgent:
             "cost_usd": answer.cost_usd,
             "retries": answer.retries,
             "prompt_version": version,
+            "provider": answer.provider,
+            "model_id": answer.model_id,
         }
         return {"result": result, "prompt_version": version}
 

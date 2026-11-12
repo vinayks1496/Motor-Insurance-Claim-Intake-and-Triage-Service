@@ -420,6 +420,8 @@ def retry_coverage(run_id: str) -> dict[str, Any]:
         run.updated_at = datetime.now(timezone.utc)
 
     try:
+        # A manual retry is an explicit recovery attempt after the provider has had time to recover.
+        redis_client.delete("llm:circuit:failures", "llm:circuit:open")
         queue = Queue("coverage", connection=redis_client, default_timeout=120)
         queue.enqueue(
             "app.workers.coverage.process_coverage",
