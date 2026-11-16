@@ -174,49 +174,20 @@ For a local reproducible reset that preserves data, use `docker compose down` fo
 
 See [the runbook](docs/RUNBOOK.md), [project report](docs/REPORT.md), [evaluation notes](evaluation/README.md), [incident worksheet](docs/INCIDENT_LOG.md), and [corpus notes](corpus/README.md).
 
-## Policy sources
+## Policy sources and corpus handling
 
-The current corpus references official documents hosted by New India Assurance: [Private Car Base Package Policy](https://www.newindia.co.in/assets/docs/know-more/motor/STANDARD%20FORM%20FOR%20PRIVATE%20CAR%20BASE%20PACKAGE%20POLICY.pdf), [India Motor Tariff 2002](https://www.newindia.co.in/cms/2a38793a-2c85-4d42-bc23-d510918c432e/IMT%202002.pdf?guest=true), and [Motor Insurance Do's and Don'ts](https://www.newindia.co.in/assets/docs/know-more/motor/DOs%20AND%20DONTS%20Motor_dep.pdf). Review current wording, schedule, endorsements, and claim circumstances with the insurer before real-world use.
+The project references three insurer-hosted public documents listed in `corpus/sources.json`: the New India Assurance private-car base package policy wording, the private-car use section of the India Motor Tariff 2002, and New India Assurance motor claim procedural guidance.
 
-## Monitoring and verification
+### Indexing modes
+- **Official PDF** (`official_pdf`): The one-shot corpus indexer fetches the full PDFs into a Docker volume when reachable. These are the authoritative sources.
+- **Offline excerpt** (`offline_excerpt`): Compact Markdown files in `corpus/` contain paraphrased and labeled content for use when remote PDF downloads are unavailable. These are not complete policy wording.
 
-ClaimFlow includes comprehensive monitoring, evaluation, and verification mechanisms:
+### Source manifest
+The index manifest (`corpus/status` API endpoint) distinguishes `official_pdf` from `offline_excerpt` sources and records: source name, fetch status, hash, index version, chunk count, and build duration.
 
-### Tracing and spans
-- OpenTelemetry spans are exported to Jaeger for end-to-end claim lifecycle visualization.
-- Traces cover submission, validation, intake, coverage, retrieval, verification, and routing steps.
-- Correlational IDs propagate through all agent events and database records.
+When remote retrieval is unavailable, the system falls back to the offline excerpt corpus. Every citation retains the source name and official URL. The handler should review the actual issued schedule, endorsements, and applicable policy documents before acting on any real claim.
 
-### Metrics
-- Prometheus scrapes API, agent, and cAdvisor metrics from the container stack.
-- Key metrics include `claimflow_run_latency_seconds`, `claimflow_llm_retries_total`, queue depth, and worker uptime.
-- Grafana dashboards provisioned with agent/service health measures for p50/p95 latency, token/cost estimates, and SLO tracking (target p95 ≤ 15 seconds).
-- Circuit-breaker state for LLM provider retries is tracked via Redis and exposed as a metric.
+### Corpus notes
+See [corpus README](corpus/README.md) for detailed notes on source handling, and `GET /api/v1/corpus/status` and `/sources` for inspecting the index build and source manifest.
 
-### Evaluation
-- The labeled set in `evaluation/cases.json` defines 20 synthetic scenarios covering private/professional use, theft, third-party injury, total loss, high repair estimates, commercial restrictions, and prompt-injection attempts.
-- `python evaluation/evaluate.py --base-url http://localhost:8000` runs the benchmark and writes timestamped JSON/CSV results to `evaluation/results/`.
-- Scores assess position, route, escalation, classification, guardrail, and citation-integrity agreement.
-- A malformed-input quarantine check is included; the suite is a small regression aid and does not establish policy correctness.
-
-### Verification mechanisms
-- **Citation validation**: every summary citation must resolve to a retrieved passage via FAISS.
-- **Lexical support check**: verifies cited passages actually support the summary claims.
-- **Guardrail screening**: input guardrails flag instruction injection/toxicity before model execution.
-- **Bounded tool calls**: coverage analysis has enforced step limits, tool call limits, wall time, and tool timeouts.
-- **Provider circuit breaker**: Redis-backed state prevents repeated failed LLM calls;可通过 `POST /api/v1/demo/provider-outage` enabled/cleared for demonstration.
-- **Handler feedback**: recorded via `POST /api/v1/runs/{run_id}/feedback` and inspectable at `/api/v1/feedback/summary` and `/recent`.
-
-See [the runbook](docs/RUNBOOK.md), [project report](docs/REPORT.md), [evaluation notes](evaluation/README.md), [incident worksheet](docs/INCIDENT_LOG.md), and [corpus notes](corpus/README.md).
-
-## Evaluation
-- The labeled set in `evaluation/cases.json` has 20 synthetic scenarios, including private and professional use, theft/police reporting, third-party injury, possible total loss, high repair estimate, paid delivery and commercial use restrictions, unsupported insurer/product scope, and a prompt-injection attempt. It scores position, route, escalation, classification, guardrail, and citation integrity, and includes a malformed-payload quarantine check.
-
-After starting the stack, run:
-
-```powershell
-python -m pip install httpx
-python evaluation/evaluate.py --base-url http://localhost:8000
-```
-
-It writes a timestamped JSON result and CSV to `evaluation/results/`, plus `latest.json` for the dashboard. It waits between requests so the default rate limit remains active. The suite is a small regression aid; it does not establish policy correctness or real-world performance. Do not interpret a score as a claim decision.
+The current corpus references official documents hosted by New India Assurance: [Private Car Base Package Policy](https://www.newindia.co.in/assets/docs/know-more/motor/STANDARD%20FORM%20FOR%20PRIVATE%20CAR%20BASE%20POLICY.pdf), [India Motor Tariff 2002](https://www.newindia.co.in/cms/2a38793a-2c85-4d42-bc23-d510918c432e/IMT%202002.pdf?guest=true), and [Motor Insurance Do's and Don'ts](https://www.newindia.co.in/assets/docs/know-more/motor/DOs%20AND%20DONTS%20Motor_dep.pdf). Review current wording, schedule, endorsements, and claim circumstances with the insurer before real-world use.
