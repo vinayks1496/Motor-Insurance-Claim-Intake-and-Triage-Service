@@ -64,6 +64,12 @@ flowchart LR
 
 FastAPI writes the validated FNOL and queues an intake job. The dedicated intake worker extracts a bounded set of fields and hands the run to a separate coverage queue. The coverage agent searches for an apparent grant and then separately searches for restrictions, exceptions, or other modifying terms. Search, clause lookup, and FNOL-field lookup are bounded tools. Every final citation must resolve to a retrieved passage and the summary must pass a lightweight lexical-support check. Verification failures and model/provider outages route to a human-review result.
 
+## Agent responsibilities
+
+**Intake Agent** (`I`): The Intake LangGraph agent extracts bounded fields from the free-text FNOL description, screens for instruction injection and toxicity, classifies the report, and queues a safe handoff to the coverage queue. It operates on the Redis intake queue and its events are recorded in PostgreSQL.
+
+**Coverage Agent** (`P`): The Coverage LangGraph agent searches the policy corpus via FAISS retrieval, identifies apparent grants and separately searches for restrictions, exceptions, or other modifying terms. It performs clause and support verification, ensures citation IDs resolve to retrieved passages, and validates lexical support for summaries. Coverage analysis has bounded steps, tool calls, wall time, and tool timeouts. Events are recorded in PostgreSQL and backed by Redis queue state.
+
 PostgreSQL stores FNOL records, run state, correlation IDs, agent events, prompt versions, token/cost estimates, quarantine records, handler feedback, and sampled quality indicators. Redis backs RQ job queues, idempotency/rate-limit state, retrieval cache, and circuit-breaker state. Local sparse word/bigram hashing plus FAISS makes indexing repeatable without a hosted embeddings key. OpenTelemetry spans export to Jaeger; Prometheus scrapes API, agent, and cAdvisor metrics; Grafana is provisioned with an agent/service health dashboard.
 
 ## Demonstration
