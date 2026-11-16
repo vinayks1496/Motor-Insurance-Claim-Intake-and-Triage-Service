@@ -254,7 +254,7 @@ def contracts() -> dict[str, Any]:
             "method": "POST",
             "path": "/api/v1/runs/{run_id}/retry",
             "success_status": 202,
-            "description": "Retry coverage after a recorded processing failure; preserve intake.",
+            "description": "Retry coverage after a recorded processing failure, preserve intake.",
         },
     }
 
