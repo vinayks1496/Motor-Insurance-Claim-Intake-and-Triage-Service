@@ -31,6 +31,16 @@ All published ports bind to loopback. Use synthetic information only: this educa
 
 ## Claim lifecycle
 
+The claim intake and triage workflow processes First Notice of Loss (FNOL) submissions through a structured asynchronous pipeline:
+
+1. **Submission validation** - POST `/api/v1/runs` validates the FNOL schema, Indian registration format, date/injury consistency, loss type, and vehicle-use type. Invalid inputs are quarantined and no agent starts.
+2. **Intake agent** - The Intake LangGraph agent (`I`) extracts bounded fields from the free-text description, screens for instruction injection/toxicity, and classifies the report. A safe handoff is queued to the coverage queue.
+3. **Input guardrail** - Guardrail `G` flags potentially problematic inputs for human investigation (`H`) or clears them for coverage analysis.
+4. **Coverage agent** - The Coverage LangGraph agent (`P`) searches the policy corpus via FAISS retrieval (`D`), identifies apparent grants and separately searches for restrictions, exceptions, or modifying terms. Citation IDs must resolve to retrieved passages.
+5. **Lexical support check** - The summary must pass a lightweight lexical-support check; if it fails, the run routes to human investigation.
+6. **Advisory routing** - Verified results receive an advisory route with citations (`T`). Unverified or conflicting results route to human investigation (`H`).
+7. **Handler feedback** - The route reason and handler rating are recorded via `POST /api/v1/runs/{run_id}/feedback`.
+
 ```mermaid
 flowchart LR
   A[FNOL web form or API] --> B{Schema and date validation}
