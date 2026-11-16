@@ -10,11 +10,31 @@ ClaimFlow is an asynchronous, human-reviewed motor claim intake and triage demon
 
 Prerequisites: Docker Desktop with Compose v2, 8 GB or more memory recommended, and network access for initial container images. Runtime source downloads are attempted when enabled; offline excerpt files are provided as a fallback.
 
-```powershell
-docker compose up --build -d
-docker compose ps
-docker compose logs -f corpus-indexer api intake-worker coverage-worker
-```
+### Local setup steps
+
+1. **Clone the repository** and ensure Docker Desktop is running with Compose v2.
+2. **Start the stack**:
+   ```powershell
+   docker compose up --build -d
+   ```
+3. **Verify the indexer completed**: wait for the corpus-indexer container to finish building the FAISS index (check `docker compose ps`).
+4. **Check readiness**: verify `http://localhost:8000/health/ready` returns healthy before submitting claims.
+5. **Open the workspace**: navigate to `http://localhost:8080` to use the claims dashboard.
+
+### Post-start configuration
+
+- **Local overrides**: copy `.env.example` to `.env` only when a local override is needed. The deterministic stub is the clean-start and load-testing default.
+- **Real inference**: set `LLM_BACKEND=openai_compatible` and configure the provider's chat-completions base URL, model ID and API key in the ignored local `.env`.
+- **Per-agent models**: `LLM_INTAKE_MODEL_ID` and `LLM_COVERAGE_MODEL_ID` can override the shared `LLM_MODEL_ID` independently.
+- **Token pricing**: set token cost rates globally or per agent; use zero for a free tier.
+- **Rate limits**: the default per-client submission limit can be overridden with `CLIENT_RATE_LIMIT_PER_MINUTE` in a local, untracked `.env`.
+- **Locust load testing**: optionally start with `docker compose --profile loadtest up -d locust`.
+
+### Reset and reproducibility
+
+- **Preserve data**: use `docker compose down` followed by `docker compose up --build -d`. PostgreSQL, Redis, FAISS index, source PDFs, Prometheus and Grafana each use named volumes.
+- **Rebuild embeddings**: after a source or prompt-independent wording change, run `docker compose run --rm -e FORCE_REEMBED=1 corpus-indexer`, then restart API and workers.
+- **Erase all data**: use `docker compose down -v` only when intending to erase database and telemetry volumes.
 
 Open [the ClaimFlow workspace](http://localhost:8080). The initial corpus index build can take a few minutes. Check `http://localhost:8000/health/ready` or `/health/ready` through the workspace host before submitting claims.
 
