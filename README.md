@@ -2,15 +2,39 @@
 
 ClaimFlow is an end-to-end MLOps mini-project for asynchronous First Notice of Loss intake and evidence-backed claim triage. It accepts structured motor-claim details, uses two separately queued agents to classify/extract and investigate policy evidence, then recommends a handler route with citations. Recommendations are advisory; the system never approves, rejects, settles, or calculates a claim.
 
+## Project Overview
+
+ClaimFlow is an asynchronous, human-reviewed motor claim intake and triage demonstration. It accepts a First Notice of Loss (FNOL), validates and quarantines malformed input, extracts incident fields with an intake agent, retrieves relevant policy passages with a separate coverage agent, verifies citations, and routes the result for fast-track handling, surveyor assignment, or investigation. The service records prompt versions, model usage, latency, retries, quality samples, feedback, queue health, metrics, and traces. It makes advisory recommendations only; a claims handler remains responsible for decisions.
+
 ## Start the project
 
 Prerequisites: Docker Desktop with Compose v2, 8 GB or more memory recommended, and network access for initial container images. Runtime source downloads are attempted when enabled; offline excerpt files are provided as a fallback.
 
-```powershell
-docker compose up --build -d
-docker compose ps
-docker compose logs -f corpus-indexer api intake-worker coverage-worker
-```
+### Local setup steps
+
+1. **Clone the repository** and ensure Docker Desktop is running with Compose v2.
+2. **Start the stack**:
+   ```powershell
+   docker compose up --build -d
+   ```
+3. **Verify the indexer completed**: wait for the corpus-indexer container to finish building the FAISS index (check `docker compose ps`).
+4. **Check readiness**: verify `http://localhost:8000/health/ready` returns healthy before submitting claims.
+5. **Open the workspace**: navigate to `http://localhost:8080` to use the claims dashboard.
+
+### Post-start configuration
+
+- **Local overrides**: copy `.env.example` to `.env` only when a local override is needed. The deterministic stub is the clean-start and load-testing default.
+- **Real inference**: set `LLM_BACKEND=openai_compatible` and configure the provider's chat-completions base URL, model ID and API key in the ignored local `.env`.
+- **Per-agent models**: `LLM_INTAKE_MODEL_ID` and `LLM_COVERAGE_MODEL_ID` can override the shared `LLM_MODEL_ID` independently.
+- **Token pricing**: set token cost rates globally or per agent; use zero for a free tier.
+- **Rate limits**: the default per-client submission limit can be overridden with `CLIENT_RATE_LIMIT_PER_MINUTE` in a local, untracked `.env`.
+- **Locust load testing**: optionally start with `docker compose --profile loadtest up -d locust`.
+
+### Reset and reproducibility
+
+- **Preserve data**: use `docker compose down` followed by `docker compose up --build -d`. PostgreSQL, Redis, FAISS index, source PDFs, Prometheus and Grafana each use named volumes.
+- **Rebuild embeddings**: after a source or prompt-independent wording change, run `docker compose run --rm -e FORCE_REEMBED=1 corpus-indexer`, then restart API and workers.
+- **Erase all data**: use `docker compose down -v` only when intending to erase database and telemetry volumes.
 
 Open [the ClaimFlow workspace](http://localhost:8080). The initial corpus index build can take a few minutes. Check `http://localhost:8000/health/ready` or `/health/ready` through the workspace host before submitting claims.
 
@@ -26,6 +50,16 @@ Open [the ClaimFlow workspace](http://localhost:8080). The initial corpus index 
 All published ports bind to loopback. Use synthetic information only: this educational workspace has no user authentication or authorization and is not ready for real claim or personal data.
 
 ## Claim lifecycle
+
+The claim intake and triage workflow processes First Notice of Loss (FNOL) submissions through a structured asynchronous pipeline:
+
+1. **Submission validation** - POST `/api/v1/runs` validates the FNOL schema, Indian registration format, date/injury consistency, loss type, and vehicle-use type. Invalid inputs are quarantined and no agent starts.
+2. **Intake agent** - The Intake LangGraph agent (`I`) extracts bounded fields from the free-text description, screens for instruction injection/toxicity, and classifies the report. A safe handoff is queued to the coverage queue.
+3. **Input guardrail** - Guardrail `G` flags potentially problematic inputs for human investigation (`H`) or clears them for coverage analysis.
+4. **Coverage agent** - The Coverage LangGraph agent (`P`) searches the policy corpus via FAISS retrieval (`D`), identifies apparent grants and separately searches for restrictions, exceptions, or modifying terms. Citation IDs must resolve to retrieved passages.
+5. **Lexical support check** - The summary must pass a lightweight lexical-support check; if it fails, the run routes to human investigation.
+6. **Advisory routing** - Verified results receive an advisory route with citations (`T`). Unverified or conflicting results route to human investigation (`H`).
+7. **Handler feedback** - The route reason and handler rating are recorded via `POST /api/v1/runs/{run_id}/feedback`.
 
 ```mermaid
 flowchart LR
@@ -49,6 +83,23 @@ flowchart LR
 ```
 
 FastAPI writes the validated FNOL and queues an intake job. The dedicated intake worker extracts a bounded set of fields and hands the run to a separate coverage queue. The coverage agent searches for an apparent grant and then separately searches for restrictions, exceptions, or other modifying terms. Search, clause lookup, and FNOL-field lookup are bounded tools. Every final citation must resolve to a retrieved passage and the summary must pass a lightweight lexical-support check. Verification failures and model/provider outages route to a human-review result.
+
+## Agent responsibilities
+
+**Intake Agent** (`I`): The Intake LangGraph agent extracts bounded fields from the free-text FNOL description, screens for instruction injection and toxicity, classifies the report, and queues a safe handoff to the coverage queue. It operates on the Redis intake queue and its events are recorded in PostgreSQL.
+
+**Coverage Agent** (`P`): The Coverage LangGraph agent searches the policy corpus via FAISS retrieval, identifies apparent grants and separately searches for restrictions, exceptions, or other modifying terms. It performs clause and support verification, ensures citation IDs resolve to retrieved passages, and validates lexical support for summaries. Coverage analysis has bounded steps, tool calls, wall time, and tool timeouts. Events are recorded in PostgreSQL and backed by Redis queue state.
+
+## RAG and policy retrieval process
+
+ClaimFlow uses a Retrieval-Augmented Generation (RAG) approach for policy verification:
+
+1. **Corpus indexing** - The policy documents (Private Car Base Package Policy, India Motor Tariff 2002 private-car section, and Motor Insurance Do's and Don'ts) are indexed using sparse word/bigram hashing and FAISS vector similarity. The index manifest distinguishes `official_pdf` from `offline_excerpt` sources.
+2. **Query embedding** - The coverage agent converts the FNOL description and extracted fields into a query vector.
+3. **Passage retrieval** - FAISS retrieves the most similar policy passages based on vector similarity, with a fallback to offline excerpt content when remote PDF downloads are unavailable.
+4. **Grant and restriction search** - The agent performs two separate searches: one for apparent grant clauses and another for restrictions, exceptions, or modifying terms that may limit coverage.
+5. **Citation validation** - Every citation in the summary must resolve to a retrieved passage. A lightweight lexical-support check verifies that cited passages actually support the summary claims.
+6. **Verification routing** - If retrieval is weak, missing, or conflicting, or if the lexical check fails, the run is routed to human investigation instead of an advisory route.
 
 PostgreSQL stores FNOL records, run state, correlation IDs, agent events, prompt versions, token/cost estimates, quarantine records, handler feedback, and sampled quality indicators. Redis backs RQ job queues, idempotency/rate-limit state, retrieval cache, and circuit-breaker state. Local sparse word/bigram hashing plus FAISS makes indexing repeatable without a hosted embeddings key. OpenTelemetry spans export to Jaeger; Prometheus scrapes API, agent, and cAdvisor metrics; Grafana is provisioned with an agent/service health dashboard.
 
@@ -123,6 +174,20 @@ For a local reproducible reset that preserves data, use `docker compose down` fo
 
 See [the runbook](docs/RUNBOOK.md), [project report](docs/REPORT.md), [evaluation notes](evaluation/README.md), [incident worksheet](docs/INCIDENT_LOG.md), and [corpus notes](corpus/README.md).
 
-## Policy sources
+## Policy sources and corpus handling
 
-The current corpus references official documents hosted by New India Assurance: [Private Car Base Package Policy](https://www.newindia.co.in/assets/docs/know-more/motor/STANDARD%20FORM%20FOR%20PRIVATE%20CAR%20BASE%20PACKAGE%20POLICY.pdf), [India Motor Tariff 2002](https://www.newindia.co.in/cms/2a38793a-2c85-4d42-bc23-d510918c432e/IMT%202002.pdf?guest=true), and [Motor Insurance Do's and Don'ts](https://www.newindia.co.in/assets/docs/know-more/motor/DOs%20AND%20DONTS%20Motor_dep.pdf). Review current wording, schedule, endorsements, and claim circumstances with the insurer before real-world use.
+The project references three insurer-hosted public documents listed in `corpus/sources.json`: the New India Assurance private-car base package policy wording, the private-car use section of the India Motor Tariff 2002, and New India Assurance motor claim procedural guidance.
+
+### Indexing modes
+- **Official PDF** (`official_pdf`): The one-shot corpus indexer fetches the full PDFs into a Docker volume when reachable. These are the authoritative sources.
+- **Offline excerpt** (`offline_excerpt`): Compact Markdown files in `corpus/` contain paraphrased and labeled content for use when remote PDF downloads are unavailable. These are not complete policy wording.
+
+### Source manifest
+The index manifest (`corpus/status` API endpoint) distinguishes `official_pdf` from `offline_excerpt` sources and records: source name, fetch status, hash, index version, chunk count, and build duration.
+
+When remote retrieval is unavailable, the system falls back to the offline excerpt corpus. Every citation retains the source name and official URL. The handler should review the actual issued schedule, endorsements, and applicable policy documents before acting on any real claim.
+
+### Corpus notes
+See [corpus README](corpus/README.md) for detailed notes on source handling, and `GET /api/v1/corpus/status` and `/sources` for inspecting the index build and source manifest.
+
+The current corpus references official documents hosted by New India Assurance: [Private Car Base Package Policy](https://www.newindia.co.in/assets/docs/know-more/motor/STANDARD%20FORM%20FOR%20PRIVATE%20CAR%20BASE%20POLICY.pdf), [India Motor Tariff 2002](https://www.newindia.co.in/cms/2a38793a-2c85-4d42-bc23-d510918c432e/IMT%202002.pdf?guest=true), and [Motor Insurance Do's and Don'ts](https://www.newindia.co.in/assets/docs/know-more/motor/DOs%20AND%20DONTS%20Motor_dep.pdf). Review current wording, schedule, endorsements, and claim circumstances with the insurer before real-world use.
