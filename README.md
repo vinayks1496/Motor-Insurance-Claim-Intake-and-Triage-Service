@@ -70,6 +70,17 @@ FastAPI writes the validated FNOL and queues an intake job. The dedicated intake
 
 **Coverage Agent** (`P`): The Coverage LangGraph agent searches the policy corpus via FAISS retrieval, identifies apparent grants and separately searches for restrictions, exceptions, or other modifying terms. It performs clause and support verification, ensures citation IDs resolve to retrieved passages, and validates lexical support for summaries. Coverage analysis has bounded steps, tool calls, wall time, and tool timeouts. Events are recorded in PostgreSQL and backed by Redis queue state.
 
+## RAG and policy retrieval process
+
+ClaimFlow uses a Retrieval-Augmented Generation (RAG) approach for policy verification:
+
+1. **Corpus indexing** - The policy documents (Private Car Base Package Policy, India Motor Tariff 2002 private-car section, and Motor Insurance Do's and Don'ts) are indexed using sparse word/bigram hashing and FAISS vector similarity. The index manifest distinguishes `official_pdf` from `offline_excerpt` sources.
+2. **Query embedding** - The coverage agent converts the FNOL description and extracted fields into a query vector.
+3. **Passage retrieval** - FAISS retrieves the most similar policy passages based on vector similarity, with a fallback to offline excerpt content when remote PDF downloads are unavailable.
+4. **Grant and restriction search** - The agent performs two separate searches: one for apparent grant clauses and another for restrictions, exceptions, or modifying terms that may limit coverage.
+5. **Citation validation** - Every citation in the summary must resolve to a retrieved passage. A lightweight lexical-support check verifies that cited passages actually support the summary claims.
+6. **Verification routing** - If retrieval is weak, missing, or conflicting, or if the lexical check fails, the run is routed to human investigation instead of an advisory route.
+
 PostgreSQL stores FNOL records, run state, correlation IDs, agent events, prompt versions, token/cost estimates, quarantine records, handler feedback, and sampled quality indicators. Redis backs RQ job queues, idempotency/rate-limit state, retrieval cache, and circuit-breaker state. Local sparse word/bigram hashing plus FAISS makes indexing repeatable without a hosted embeddings key. OpenTelemetry spans export to Jaeger; Prometheus scrapes API, agent, and cAdvisor metrics; Grafana is provisioned with an agent/service health dashboard.
 
 ## Demonstration
