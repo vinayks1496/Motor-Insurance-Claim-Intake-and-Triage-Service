@@ -2,6 +2,10 @@
 
 ClaimFlow is an end-to-end MLOps mini-project for asynchronous First Notice of Loss intake and evidence-backed claim triage. It accepts structured motor-claim details, uses two separately queued agents to classify/extract and investigate policy evidence, then recommends a handler route with citations. Recommendations are advisory; the system never approves, rejects, settles, or calculates a claim.
 
+## Project Overview
+
+ClaimFlow is an asynchronous, human-reviewed motor claim intake and triage demonstration. It accepts a First Notice of Loss (FNOL), validates and quarantines malformed input, extracts incident fields with an intake agent, retrieves relevant policy passages with a separate coverage agent, verifies citations, and routes the result for fast-track handling, surveyor assignment, or investigation. The service records prompt versions, model usage, latency, retries, quality samples, feedback, queue health, metrics, and traces. It makes advisory recommendations only; a claims handler remains responsible for decisions.
+
 ## Start the project
 
 Prerequisites: Docker Desktop with Compose v2, 8 GB or more memory recommended, and network access for initial container images. Runtime source downloads are attempted when enabled; offline excerpt files are provided as a fallback.
